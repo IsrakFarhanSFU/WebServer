@@ -25,7 +25,14 @@ def parse_args(argv):
     (directory), --workers (int, how many threads the pool starts with,
     default 8). Accept --workers from task 1 even though nothing uses it until
     task 5: every command in the handout passes it."""
-    raise NotImplementedError
+
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("--port", type=int, required=True)
+    parser.add_argument("--root", required=True)
+    parser.add_argument("--workers", type=int, default=8)
+
+    return parser.parse_args(argv)
 
 
 def recv_request_head(conn):
@@ -43,6 +50,7 @@ def parse_request(head):
     line is not three fields or a header line has no colon; handle_request turns
     that into a 400."""
     raise NotImplementedError
+    
 
 
 def resolve_path(root, target):
@@ -51,7 +59,46 @@ def resolve_path(root, target):
     Return None if the target is malformed.
     All three rules are graded: /index.html?x=1 and /index.html are the same
     file, / is that directory's index.html, and /page/sub.html works."""
-    raise NotImplementedError
+
+    if not target.startswith("/"):
+            return None
+    
+    target = target.split("?", 1)[0]  # drop query string
+    
+    decoded = bytearray()
+    i = 0
+    
+    while i < len(target):
+        if target[i] == "%":
+            if i + 2 >= len(target):
+                return None
+            try:
+                decoded.append(int(target[i + 1:i + 3], 16))
+            except ValueError:
+                return None
+            i += 3
+        else:
+            decoded.extend(target[i].encode("utf-8"))
+            i += 1
+    
+    try:
+        target = decoded.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    
+    if "\x00" in target:
+        return None
+    
+    if target.endswith("/"):
+        target += "index.html"
+    
+    root = os.path.abspath(root)
+    path = os.path.realpath(os.path.join(root, target.lstrip("/")))
+    
+    if os.path.commonpath([root, path]) != root:
+        return None
+    
+    return path
 
 
 def build_response(status, reason, body, content_type, extra=None):
@@ -61,7 +108,22 @@ def build_response(status, reason, body, content_type, extra=None):
     Every response goes through here, including 404, 400, 405 and 501, so every
     response carries all five headers. Content-Length is the number of body
     bytes that follow, and nothing else."""
-    raise NotImplementedError
+
+    lines = [
+        "HTTP/1.1 %d %s" % (status, reason),
+        "Date: %s" % formatdate(usegmt=True),
+        "Server: CMPT 371 Project 1",
+        "Content-Type: %s" % content_type,
+        "Content-Length: %d" % len(body),
+        "Connection: keep-alive",
+    ]
+    if extra is not None:
+        for name, value in extra.items():
+            lines.append("%s: %s" % (name, value))
+
+    head = "\r\n".join(lines) + "\r\n\r\n"
+
+    return head.encode("ascii") + body
 
 
 def handle_request(head, root):
@@ -71,8 +133,23 @@ def handle_request(head, root):
     from the file extension. Task 3: 400 (malformed request line or header line,
     no Host), 405 (POST and the other known methods, with Allow: GET, HEAD) and
     501 (a token that is not an HTTP method)."""
-    raise NotImplementedError
 
+    request_line = head.split(b"\r\n", 1)[0]
+    parts = request_line.decode("ascii").split()
+
+    method = parts[0]
+    target = parts[1]
+
+    path = resolve_path(root, target)
+
+    if path is None or not os.path.isfile(path):
+        body = b"404 Not Found\n"
+        return build_response(404, "Not Found", body, "text/plain")
+
+    with open(path, "r", encoding="utf-8") as f:
+        body = f.read().encode("utf-8")
+
+    return build_response(200, "OK", body, "text/html")
 
 def handle_connection(conn, root):
     """TASK 1, extended in tasks 3 and 5. Serve requests on one connection until
@@ -82,7 +159,24 @@ def handle_connection(conn, root):
     recv_request_head. Task 5: after each response, increment requests_served
     under counter_lock and print 'served <n>' to stderr, where n is the value
     this request produced, read inside the same lock that incremented it."""
-    raise NotImplementedError
+
+    conn.settimeout(5)
+
+    try:
+        while True:
+            try:
+                head = conn.recv(4096)
+            except socket.timeout:
+                break
+
+            if not head:
+                break
+
+            response = handle_request(head, root)
+            conn.sendall(response)
+
+    finally:
+        conn.close()
 
 
 def worker(work_queue, root):
@@ -102,8 +196,22 @@ def main(argv=None):
     # Given. The grading script reads this line to find your server, so print it
     # exactly as written, immediately after listen(), and keep flush=True.
     #     print("Listening on port %d" % listener.getsockname()[1], flush=True)
-    raise NotImplementedError
+    
+    args = parse_args(argv)
 
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(("127.0.0.1", args.port))
+    listener.listen()
+
+    print("Listening on port %d" % listener.getsockname()[1], flush=True)
+
+    try:
+        while True:
+            conn, addr = listener.accept()
+            handle_connection(conn, args.root)
+
+    finally:
+        listener.close()
 
 if __name__ == "__main__":
     main()
