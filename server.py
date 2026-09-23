@@ -145,11 +145,22 @@ def handle_request(head, root):
     if path is None or not os.path.isfile(path):
         body = b"404 Not Found\n"
         return build_response(404, "Not Found", body, "text/plain")
+    else:
+        with open(path, "rb") as f:
+            body = f.read()
 
-    with open(path, "r", encoding="utf-8") as f:
-        body = f.read().encode("utf-8")
+        content_type, encoding = mimetypes.guess_type(path)
 
-    return build_response(200, "OK", body, "text/html")
+        if content_type is None:
+            content_type = "application/octet-stream"
+
+        response = build_response(200, "OK", body, content_type)
+
+    if method == "HEAD":
+        response_head = response.partition(b"\r\n\r\n")[0]
+        return response_head + b"\r\n\r\n"
+
+    return response
 
 def handle_connection(conn, root):
     """TASK 1, extended in tasks 3 and 5. Serve requests on one connection until
