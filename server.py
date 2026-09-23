@@ -41,7 +41,18 @@ def recv_request_head(conn):
     if the client closed the connection first.
     In task 1 handle_connection may read the head with a single recv(); this is
     what replaces that call, and is where reading becomes correct."""
-    raise NotImplementedError
+
+    head = bytearray()
+
+    while not head.endswith(b"\r\n\r\n"):
+        chunk = conn.recv(1)
+
+        if not chunk:
+            return None
+
+        head.extend(chunk)
+
+    return bytes(head)
 
 
 def parse_request(head):
@@ -49,7 +60,33 @@ def parse_request(head):
     headers is a dict with lower-cased names. Raise ValueError if the request
     line is not three fields or a header line has no colon; handle_request turns
     that into a 400."""
-    raise NotImplementedError
+
+    lines = head.split(b"\r\n\r\n", 1)[0].split(b"\r\n")
+
+    parts = lines[0].decode("ascii").split(" ")
+
+    if len(parts) != 3 or not all(parts):
+        raise ValueError("Malformed request line")
+
+    method, target, version = parts
+
+    headers = {}
+
+    for line in lines[1:]:
+        if b":" not in line:
+            raise ValueError("Malformed header line")
+
+        name, value = line.split(b":", 1)
+
+        name = name.decode("ascii").strip().lower()
+        value = value.decode("iso-8859-1").strip()
+
+        if not name:
+            raise ValueError("Empty header name")
+
+        headers[name] = value
+
+    return method, target, version, headers
     
 
 
@@ -134,17 +171,33 @@ def handle_request(head, root):
     no Host), 405 (POST and the other known methods, with Allow: GET, HEAD) and
     501 (a token that is not an HTTP method)."""
 
-    request_line = head.split(b"\r\n", 1)[0]
-    parts = request_line.decode("ascii").split()
+    try:
+        method, target, version, headers = parse_request(head)
+    except ValueError:
+        return build_response(400, "Bad Request", 
+                              b"400 Bad Request\n", "text/plain")
 
-    method = parts[0]
-    target = parts[1]
+    if not headers.get("host"):
+        return build_response(400, "Bad Request", 
+                              b"400 Bad Request\n", "text/plain")
+
+    unsupported = ("POST", "PUT", "DELETE",
+                    "OPTIONS", "PATCH", "TRACE", "CONNECT")
+
+    if method in unsupported:
+        return build_response(405, "Method Not Allowed", 
+                              b"405 Method Not Allowed\n", "text/plain",
+                              {"Allow": "GET, HEAD"})
+
+    if method not in ("GET", "HEAD"):
+        return build_response(501, "Not Implemented", 
+                              b"501 Not Implemented\n", "text/plain")
 
     path = resolve_path(root, target)
 
     if path is None or not os.path.isfile(path):
         body = b"404 Not Found\n"
-        return build_response(404, "Not Found", body, "text/plain")
+        response = build_response(404, "Not Found", body, "text/plain")
     else:
         with open(path, "rb") as f:
             body = f.read()
@@ -157,7 +210,7 @@ def handle_request(head, root):
         response = build_response(200, "OK", body, content_type)
 
     if method == "HEAD":
-        response_head = response.partition(b"\r\n\r\n")[0]
+        response_head = response.split(b"\r\n\r\n", 1)[0]
         return response_head + b"\r\n\r\n"
 
     return response
@@ -176,11 +229,11 @@ def handle_connection(conn, root):
     try:
         while True:
             try:
-                head = conn.recv(4096)
+                head = recv_request_head(conn)
             except socket.timeout:
                 break
 
-            if not head:
+            if head is None:
                 break
 
             response = handle_request(head, root)
