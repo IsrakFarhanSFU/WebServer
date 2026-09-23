@@ -1,4 +1,4 @@
-# Name: <your full name>   Student number: <your student number>
+# Name: <Israk Farhan>   Student number: <301412948>
 """CMPT 371 Project 1 - static HTTP/1.1 server on raw TCP sockets.
 
 Usage: python3 server.py --port PORT --root DIR [--workers N]
@@ -224,6 +224,8 @@ def handle_connection(conn, root):
     under counter_lock and print 'served <n>' to stderr, where n is the value
     this request produced, read inside the same lock that incremented it."""
 
+    global requests_served
+    
     conn.settimeout(5)
 
     try:
@@ -239,6 +241,12 @@ def handle_connection(conn, root):
             response = handle_request(head, root)
             conn.sendall(response)
 
+            with counter_lock:
+                requests_served += 1
+                mine = requests_served
+            
+            print("served %d" % mine, file=sys.stderr, flush=True)
+
     finally:
         conn.close()
 
@@ -248,7 +256,14 @@ def worker(work_queue, root):
     Every worker thread runs this; none of them is created per connection.
     Nothing before task 5 calls this, and main must not start any worker threads
     until you write it."""
-    raise NotImplementedError
+
+    while True:
+        conn = work_queue.get()
+        
+        try:
+            handle_connection(conn, root)
+        finally:
+            work_queue.task_done()
 
 
 def main(argv=None):
@@ -263,6 +278,14 @@ def main(argv=None):
     
     args = parse_args(argv)
 
+    work_queue = queue.Queue()
+
+    for _ in range(args.workers):
+        thread = threading.Thread(
+            target=worker, args=(work_queue, args.root))
+        thread.daemon = True
+        thread.start()
+
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     listener.bind(("127.0.0.1", args.port))
     listener.listen()
@@ -272,7 +295,7 @@ def main(argv=None):
     try:
         while True:
             conn, addr = listener.accept()
-            handle_connection(conn, args.root)
+            work_queue.put(conn)
 
     finally:
         listener.close()
