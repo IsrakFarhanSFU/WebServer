@@ -101,13 +101,13 @@ def handle_client(conn, origin_host, origin_port):
                 try:
                     method, target, version, headers = server.parse_request(head)
                 except ValueError:
-                    response = server.make_response(400, "Bad Request",
+                    response = server.build_response(400, "Bad Request",
                                                      b"400 Bad Request\n", "text/plain")
                     conn.sendall(response)
                     continue
 
                 if not headers.get("host"):
-                    response = server.make_response(
+                    response = server.build_response(
                         400, "Bad Request", 
                         b"400 Bad Request\n", "text/plain")
                     conn.sendall(response)
