@@ -153,7 +153,7 @@ def main(argv=None):
         return 0
 
     except (OSError, ValueError) as error:
-        print("CClient error: %s" % error, file=sys.stderr)
+        print("Client error: %s" % error, file=sys.stderr)
         return 1
 
 

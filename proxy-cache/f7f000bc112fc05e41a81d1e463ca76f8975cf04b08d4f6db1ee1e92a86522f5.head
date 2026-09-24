@@ -1,0 +1,6 @@
+HTTP/1.1 200 OK
+Date: Thu, 24 Sep 2026 00:24:40 GMT
+Server: CMPT 371 Project 1
+Content-Type: application/octet-stream
+Content-Length: 200000
+Connection: keep-alive

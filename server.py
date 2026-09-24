@@ -129,7 +129,7 @@ def resolve_path(root, target):
     if target.endswith("/"):
         target += "index.html"
     
-    root = os.path.abspath(root)
+    root = os.path.realpath(root)
     path = os.path.realpath(os.path.join(root, target.lstrip("/")))
     
     if os.path.commonpath([root, path]) != root:
@@ -262,6 +262,8 @@ def worker(work_queue, root):
         
         try:
             handle_connection(conn, root)
+        except OSError:
+            pass
         finally:
             work_queue.task_done()
 
